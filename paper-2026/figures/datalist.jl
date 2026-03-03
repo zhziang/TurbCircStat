@@ -1,234 +1,144 @@
-@time begin
-	@info "wavenumber-energy_spectra"
-	group = create_group(pfile, "wavenumber-energy_spectra")
-	for (Re, datum) in rawdata
-		kr = radialk(datum.grid)
-		Ehrs = map(datum.ζhs) do ζh
-			Eh = energy(ζh, datum.grid)
-			radialspectrum(Eh, datum.grid)
-		end
-		mean, std = measure(Ehrs)
-		group["Re$(Re)/x"] = Array(kr)
-		group["Re$(Re)/y"] = Array(mean)
-		group["Re$(Re)/Δy"] = Array(std)
-	end
+function energy_spectrum(Re)
+    datum = rawdata[Re]
+    h5group = create_group(pfile, "wavenumber-energy_spectra/$(Re)")
+    kr = radialk(datum.grid)
+    Ehrs = map(datum.ζhs) do ζh
+        Eh = energy(ζh, datum.grid)
+        radialspectrum(Eh, datum.grid)
+    end
+    mean, std = measure(Ehrs)
+    h5group["x"] = Array(kr)
+    h5group["y"] = Array(mean)
+    h5group["Δy"] = Array(std)
+    return nothing
 end
 
-@time begin
-	@info "wavenumber-normalized_energy_fluxes"
-	group = create_group(pfile, "wavenumber-normalized_energy_fluxes")
-	for (Re, datum) in rawdata
-		kr = radialk(datum.grid)
-		Fhrs = map(datum.ζhs) do ζh
-			Nh = energyInjectionRate(ζh, datum.grid)
-			cumradialspectrum(Nh, datum.grid)
-		end
-		mean, std = measure(Fhrs)
-		group["Re$(Re)/x"] = Array(kr)
-		group["Re$(Re)/y"] = Array(mean)
-		group["Re$(Re)/Δy"] = Array(std)
-	end
+function energy_flux(Re)
+    datum = rawdata[Re]
+    h5group = create_group(pfile, "wavenumber-energy_fluxes/$(Re)")
+    kr = radialk(datum.grid)
+    Fhrs = map(datum.ζhs) do ζh
+        Nh = energyInjectionRate(ζh, datum.grid)
+        cumradialspectrum(Nh, datum.grid)
+    end
+    mean, std = measure(Fhrs)
+    h5group["x"] = Array(kr)
+    h5group["y"] = Array(mean)
+    h5group["Δy"] = Array(std)
+    return nothing
 end
 
-@time begin
-	@info "wavenumber-enstrophy_fluxes"
-	group = create_group(pfile, "wavenumber-enstrophy_fluxes")
-	for (Re, datum) in rawdata
-		kr = radialk(datum.grid)
-		kf = datum.grid.nx / 3sqrt(Re)
-		Fhrs = map(datum.ζhs) do ζh
-			Nh = enstrophyInjectionRate(ζh, datum.grid)
-			cumradialspectrum(Nh, datum.grid) ./ kf^2
-		end
-		mean, std = measure(Fhrs)
-		group["Re$(Re)/x"] = Array(kr)
-		group["Re$(Re)/y"] = Array(mean)
-		group["Re$(Re)/Δy"] = Array(std)
-	end
+function enstrophy_flux(Re)
+    datum = rawdata[Re]
+    h5group = create_group(pfile, "wavenumber-enstrophy_fluxes/$(Re)")
+    kr = radialk(datum.grid)
+    kf = datum.grid.nx / 3sqrt(Re)
+    Fhrs = map(datum.ζhs) do ζh
+        Nh = enstrophyInjectionRate(ζh, datum.grid)
+        cumradialspectrum(Nh, datum.grid) ./ kf^2
+    end
+    mean, std = measure(Fhrs)
+    h5group["x"] = Array(kr)
+    h5group["y"] = Array(mean)
+    h5group["Δy"] = Array(std)
+    return nothing
 end
 
-@time begin
-	@info "velocity-pdf:primitive"
-	group = create_group(pfile, "velocity-pdf:primitive")
-	for (Re, datum) in rawdata
-		grid = datum.grid
+function velocity_pdf(Re, isfiltered)
+    datum = rawdata[Re]
+    if isfiltered
+        h5group = create_group(pfile, "velocity-pdf:filtered/$(Re)")
+        ζhs = datum.fζhs
+    else
+        h5group = create_group(pfile, "velocity-pdf:primitive/$(Re)")
+        ζhs = datum.ζhs
+    end
+    grid = datum.grid
 
-		umax = maximum(datum.ζhs) do ζh
-			uh = im * ζh .* grid.invKrsq .* grid.l
-			u = grid.rfftplan \ uh
-			maximum(u)
-		end
+    umax = maximum(ζhs) do ζh
+        uh = im * ζh .* grid.invKrsq .* grid.l
+        u = grid.rfftplan \ uh
+        maximum(u)
+    end
 
-		bin = range(-umax, umax, 100)
-		bc = (bin[1:(end-1)] .+ bin[2:end]) / 2
+    bin = range(-umax, umax, 100)
+    bc = (bin[1:(end-1)] .+ bin[2:end]) / 2
 
-		pdfs = map(datum.ζhs) do ζh
-			uh = im * ζh .* grid.invKrsq .* grid.l
-			u = grid.rfftplan \ uh
-			pdf(u, bin)
-		end
-		mean, std = measure(pdfs)
-		group["Re$(Re)/x"] = Array(bc)
-		group["Re$(Re)/y"] = Array(mean)
-		group["Re$(Re)/Δy"] = Array(std)
-	end
+    pdfs = map(ζhs) do ζh
+        uh = im * ζh .* grid.invKrsq .* grid.l
+        u = grid.rfftplan \ uh
+        pdf(u, bin)
+    end
+    mean, std = measure(pdfs)
+    h5group["x"] = Array(bc)
+    h5group["y"] = Array(mean)
+    h5group["Δy"] = Array(std)
+
+    return nothing
 end
 
-@time begin
-	@info "velocity-pdf:filtered"
-	group = create_group(pfile, "velocity-pdf:filtered")
-	for (Re, datum) in rawdata
-		grid = datum.grid
+function loopsizes_moments(Re, order, width, height)
+    datum = rawdata[Re]
+    grid = datum.grid
+    ns = 1:floor(Int, min(grid.nx / width, grid.ny / height))
+    h5group = create_group(pfile, "loop_sizes-square_moments/$(Re)/$(order)/$(width)×$(height)")
+    loops = [rectsloop(grid, n * width, n * height, 1, 1) for n in ns]
 
-		umax = maximum(datum.fζhs) do ζh
-			uh = im * ζh .* grid.invKrsq .* grid.l
-			u = grid.rfftplan \ uh
-			maximum(u)
-		end
+    moments = map(loops) do hsh
+        sp = map(datum.fζhs) do fζh
+            Γ = getΓ(fζh, hsh, grid)
+            moment(abs.(Γ), order)
+        end
+        mean, std = measure(sp)
+        mean ± std
+    end
+    h5group["x"] = Array(ns)
+    h5group["y"] = Array(Measurements.value.(moments))
+    h5group["Δy"] = Array(Measurements.uncertainty.(moments))
 
-		bin = range(-umax, umax, 100)
-		bc = (bin[1:(end-1)] .+ bin[2:end]) / 2
-
-		pdfs = map(datum.fζhs) do ζh
-			uh = im * ζh .* grid.invKrsq .* grid.l
-			u = grid.rfftplan \ uh
-			pdf(u, bin)
-		end
-		mean, std = measure(pdfs)
-		group["Re$(Re)/x"] = Array(bc)
-		group["Re$(Re)/y"] = Array(mean)
-		group["Re$(Re)/Δy"] = Array(std)
-	end
+    return nothing
 end
 
-@time begin
-	@info "loop_size-var_ratio:equal area"
-	group = create_group(pfile, "loop_size-var_ratio:equal area")
+function aspect_ratio_moments(Re, order, isarea)
+    datum = rawdata[Re]
+    grid = datum.grid
+    if isarea
+        h5group = create_group(pfile, "aspect_ratio-moments/area8100/$(Re)/$(order)")
+        loopsizes = [15; 20; 30; 40; 45; 60; 90]
+        rects = [rectsloop(grid, l, 8100 ÷ l, 1, 1) for l in loopsizes]
+        aspect_ratios = loopsizes .^ 2 ./ 8100
+    else
+        h5group = create_group(pfile, "aspect_ratio-moments/perimeter180/$(Re)/$(order)")
+        loopsizes = 10:10:90
+        rects = [rectsloop(grid, l, 180 - l, 1, 1) for l in loopsizes]
+        aspect_ratios = loopsizes ./ (180 .- loopsizes)
+    end
 
-	for (Re, datum) in rawdata
-		grid = datum.grid
-		dl = 2π / grid.nx
-		loopsizes = (10:10:floor(Int, grid.nx/2))
-		squares = [rectsloop(grid, l, l, 1, 1) for l in loopsizes]
-		rects = [rectsloop(grid, 2 * l, l ÷ 2, 1, 1) for l in loopsizes]
+    moments = map(rects) do hsh
+        sp = map(datum.fζhs) do fζh
+            Γ = getΓ(fζh, hsh, grid)
+            moment(abs.(Γ), order)
+        end
+        mean, std = measure(sp)
+        mean ± std
+    end
 
-		varSquares = map(squares) do hsh
-			vars = map(datum.fζhs) do fζh
-				Γ = getΓ(fζh, hsh, grid)
-				moment(Γ, 2)
-			end
-			mean, std = measure(vars)
-			mean ± std
-		end
-
-		varRects = map(rects) do hsh
-			vars = map(datum.fζhs) do fζh
-				Γ = getΓ(fζh, hsh, grid)
-				moment(Γ, 2)
-			end
-			mean, std = measure(vars)
-			mean ± std
-		end
-
-		varRatios = varRects ./ varSquares
-		group["Re$(Re)/x"] = Array(loopsizes .* dl)
-		group["Re$(Re)/y"] = Array(Measurements.value.(varRatios))
-		group["Re$(Re)/Δy"] = Array(Measurements.uncertainty.(varRatios))
-	end
+    group["Re$(Re) order$(order)/x"] = Array(aspect_ratios)
+    group["Re$(Re) order$(order)/y"] = Array(Measurements.value.(moments))
+    group["Re$(Re) order$(order)/Δy"] = Array(Measurements.uncertainty.(moments))
 end
 
-@time begin
-	@info "loop_size-var_ratio:equal perimeter"
-	group = create_group(pfile, "loop_size-var_ratio:equal perimeter")
-
-	for (Re, datum) in rawdata
-		grid = datum.grid
-		dl = 2π / grid.nx
-		loopsizes = (10:10:floor(Int, grid.nx/2))
-		squares = [rectsloop(grid, l, l, 1, 1) for l in loopsizes]
-		rects = [rectsloop(grid, 8l ÷ 5, 2l ÷ 5, 1, 1) for l in loopsizes]
-
-		varSquares = map(squares) do hsh
-			vars = map(datum.fζhs) do fζh
-				Γ = getΓ(fζh, hsh, grid)
-				moment(Γ, 2)
-			end
-			mean, std = measure(vars)
-			mean ± std
-		end
-
-		varRects = map(rects) do hsh
-			vars = map(datum.fζhs) do fζh
-				Γ = getΓ(fζh, hsh, grid)
-				moment(Γ, 2)
-			end
-			mean, std = measure(vars)
-			mean ± std
-		end
-
-		varRatios = varRects ./ varSquares
-		group["Re$(Re)/x"] = Array(loopsizes .* dl)
-		group["Re$(Re)/y"] = Array(Measurements.value.(varRatios))
-		group["Re$(Re)/Δy"] = Array(Measurements.uncertainty.(varRatios))
-	end
-end
-
-@time begin
-	Re = 4.04
-	datum = rawdata[Re]
-	@info "aspect_ratio-moments_ratio:fixed area"
-	group = create_group(pfile, "aspect_ratio-moments_ratio:fixed area")
-
-	grid = datum.grid
-	fixarea = 8100
-	loopsizes = [15; 20; 30; 40; 45; 60; 90]
-	rects = [rectsloop(grid, l, fixarea ÷ l, 1, 1) for l in loopsizes]
-	orders = 2:2:10
-
-	HDF5.attributes(group)["area"] = fixarea
-
-	momentsRatio = map(orders) do order
-		momRects = map(rects) do hsh
-			moms = map(datum.fζhs) do fζh
-				Γ = getΓ(fζh, hsh, grid)
-				moment(Γ, order)
-			end
-			mean, std = measure(moms)
-			mean ± std
-		end
-		y_mea = momRects ./ last(momRects)
-		group["Re$(Re) order$(order)/x"] = Array(loopsizes .^ 2 ./ fixarea)
-		group["Re$(Re) order$(order)/y"] = Array(Measurements.value.(y_mea))
-		group["Re$(Re) order$(order)/Δy"] = Array(Measurements.uncertainty.(y_mea))
-	end
-end
-
-@time begin
-	Re = 3.5
-	datum = rawdata[Re]
-	@info "aspect_ratio-moments_ratio:fixed perimeter"
-	group = create_group(pfile, "aspect_ratio-moments_ratio:fixed perimeter")
-
-	grid = datum.grid
-	fixperi = 180
-	loopsizes = vec(10:10:90)
-	rects = [rectsloop(grid, l, fixperi - l, 1, 1) for l in loopsizes]
-	orders = 2:2:10
-
-	HDF5.attributes(group)["perimeter"] = fixperi
-
-	momentsRatio = map(orders) do order
-		momRects = map(rects) do hsh
-			moms = map(datum.fζhs) do fζh
-				Γ = getΓ(fζh, hsh, grid)
-				moment(Γ, order)
-			end
-			mean, std = measure(moms)
-			mean ± std
-		end
-		y_mea = momRects ./ last(momRects)
-		group["Re$(Re) order$(order)/x"] = Array(loopsizes ./ (fixperi .- loopsizes))
-		group["Re$(Re) order$(order)/y"] = Array(Measurements.value.(y_mea))
-		group["Re$(Re) order$(order)/Δy"] = Array(Measurements.uncertainty.(y_mea))
-	end
+@time for Re in keys(rawdata)
+    energy_spectrum(Re)
+    energy_flux(Re)
+    enstrophy_flux(Re)
+    velocity_pdf(Re, true)
+    velocity_pdf(Re, false)
+    for order in 1:10
+        loopsizes_moments(Re, order, 10, 10)
+        loopsizes_moments(Re, order, 5, 20)
+        loopsizes_moments(Re, order, 4, 16)
+        aspect_ratio_moments(Re, order, true)
+        aspect_ratio_moments(Re, order, false)
+    end
 end
