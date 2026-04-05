@@ -11,18 +11,19 @@ function hamiltonian(x, y, Γ)
 end
 
 function velocity(x, y, Γ)
-    n = length(x)
+	n = length(x)
 	@. x = mod(x, 1)
 	@. y = mod(y, 1)
 	z = x .+ 1im * y
 	diffz = z .- transpose(z)
-	
-    U = Uᵢⱼ.(diffz) .* Γ'
+
+	U = Uᵢⱼ.(diffz) .* Γ'
 	U[(1:n) .== (1:n)'] .= 0
 
 	cxVel = sum(U; dims = 2)
 	return (real(cxVel), imag(cxVel))
 end
+
 
 @inline Uᵢⱼ(z) = 1im * (conj(wζ(z)) - π * z) / (2π)
 
