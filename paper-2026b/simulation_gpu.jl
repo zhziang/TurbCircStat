@@ -4,6 +4,7 @@ import DiffEqCallbacks as CB, NonlinearSolve as NLS
 import SciMLBase as SMLB
 import Logging: global_logger
 import TerminalLoggers: TerminalLogger
+import SciMLBase
 global_logger(TerminalLogger())
 include("utils.jl")
 
@@ -14,6 +15,10 @@ aps = ArgParseSettings()
     help = "Number of point vortices (even number, half positive halfnegative)."
     arg_type = Int
     default = 32
+    "--href"
+    help = "Reference value of the Hamiltonian."
+    arg_type = Float64
+    default = 0.0
     "--tspan"
     help = "Time span of the simulation"
     arg_type = Float64
@@ -27,6 +32,7 @@ args = parse_args(aps)
 
 npoints = args["npoints"]
 tspan = args["tspan"]
+href = args["href"]
 
 mutable struct PeriodicPV <: Function
     t::Float64
@@ -82,33 +88,24 @@ function hamiltonian(u)
     return sum(H)
 end
 
-u₀ = rand(npoints, 2)
-
-function set_hamiltonian(u₀, h)
-    nullvec(du, u, p, t) = begin
-        fill!(du, 0.0)
-        return nothing
-    end
-    prob = ODE.ODEProblem(nullvec, u₀, (0, 1))
-
-    h₀ = hamiltonian(u₀)
-
-    manifold(residual, u, p, t) = begin
-        residual .= (h-h₀) .* t + h₀ - hamiltonian(u)
-        return nothing
+function set_u₀(h₀)
+    sspfunc(du,u,p,t) = begin
+        odefunc(du,u,p,t)
+        du .= hcat(du[:,2], -du[:,1]) .* circs .* (hamiltonian(u) - h₀)
     end
 
-	mproj = CB.ManifoldProjection(manifold, autodiff=NLS.AutoForwardDiff(), resid_prototype=zeros(1))
+    prob = SciMLBase.SteadyStateProblem(sspfunc, rand(npoints,2))
+    
+    sol = ODE.solve(prob)
 
-	sol = ODE.solve(prob, ODE.Vern7(); callback=mproj)
-	return last(sol.u)
+    return sol.u
+
 end
 
-
-initial_hamiltonian = hamiltonian(u₀)
+u₀ = set_u₀(href)
 
 function isoHamiltonian_manifold(residual, u, p, t)
-    residual .= initial_hamiltonian - hamiltonian(u)
+    residual .= href - hamiltonian(u)
     return nothing
 end
 
@@ -120,10 +117,9 @@ sol = @time ODE.solve(prob, ODE.Vern7(); progress=true, callback=mproj)
 
 @info sol.retcode
 
-output_path = args["path"] * "/.output/N$(npoints).h5"
+output_path = args["path"] * "/.output/N$(npoints)H$(href).h5"
 isdir(args["path"] * "/.output/") || mkdir(args["path"] * "/.output/")
 h5open(output_path, "w") do fid
-
     create_dataset(fid, "pv positions", Float64, (npoints, 2, Int(1e3)))
     create_dataset(fid, "hamiltonians", Float64, (Int(1e3),))
     for (n, t) in enumerate(range(0, tspan, Int(1e3)))
